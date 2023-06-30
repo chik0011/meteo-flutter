@@ -16,9 +16,6 @@ class Position {
   });
 
   factory Position.fromJson(json) {
-    print(json);
-
-    print(json['name']);
     return Position(
       name: json['name'],
       latitude: json['latitude'],

@@ -1,26 +1,19 @@
 import 'dart:convert';
-
+import 'dart:js_interop';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:dio/dio.dart';
 import 'package:meteo/class/position.dart';
+import 'package:meteo/class/weather.dart';
 
 Future main() async {
-  // To load the .env file contents into dotenv.
-  // NOTE: fileName defaults to .env and can be omitted in this case.
-  // Ensure that the filename corresponds to the path in step 1 and 2.
   await dotenv.load(fileName: ".env");
   runApp(const MyApp());
 }
 
-/*void main() {
-  runApp(const MyApp());
-}*/
-
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -29,7 +22,8 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: const MyHomePage(title: 'Météo'),
+      debugShowCheckedModeBanner: false,
     );
   }
 }
@@ -44,43 +38,40 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
-  final dio = Dio();
-  late Future<Position> futurePosition;
-  late Position _position;
+  final dioPosition = Dio();
+  final dioWheather = Dio();
+
+  final myController = TextEditingController();
 
   @override
-  void initState() {
-    super.initState();
+  void dispose() {
+    myController.dispose();
+    super.dispose();
   }
 
-  void _incrementCounter() {
-    setState(() {
-      _counter++;
-    });
-  }
-
-  Future<Position?> getPositonHttp() async {
-    dio.options.headers["X-Api-Key"] = dotenv.env['CITY_API_KEY'];
-    dio.options.headers['content-Type'] = 'application/json';
+  Future<Position?> getPositonHttp(String city) async {
+    dioPosition.options.headers["X-Api-Key"] = dotenv.env['CITY_API_KEY'];
+    dioPosition.options.headers['content-Type'] = 'application/json';
 
     try {
-      final response =
-          await dio.get('https://api.api-ninjas.com/v1/city?name=Metz');
+      final response = await dioPosition
+          .get('https://api.api-ninjas.com/v1/city?name=$city');
 
       if (response.statusCode == 200) {
         return Position.fromJson(response.data![0]);
       }
     } catch (e) {
       print(e);
+
       rethrow;
     }
   }
 
-  void getWeatherHttp() async {
-    final response = await dio.get(
-        'https://api.openweathermap.org/data/2.5/weather?lat=44.34&lon=10.99&appid=${dotenv.env['METEO_API_KEY']}');
-    print(response);
+  Future<Weather?> getWeatherHttp(double long, double lat) async {
+    final response = await dioWheather.get(
+        'https://api.openweathermap.org/data/2.5/weather?lat=$lat&lon=$long&appid=${dotenv.env['METEO_API_KEY']}');
+
+    return Weather.fromJson(response.data!);
   }
 
   @override
@@ -91,17 +82,72 @@ class _MyHomePageState extends State<MyHomePage> {
         title: Text(widget.title),
       ),
       body: Center(
-        child: FutureBuilder(
-            future: getPositonHttp(),
-            builder: (context, snapshot) {
-              if (snapshot.hasData) {
-                return Text(snapshot.data!.name);
-              } else if (snapshot.hasError) {
-                return const Text("Error API");
-              } else {
-                return const CircularProgressIndicator();
-              }
-            }),
+          child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const Text("Entrer le nom d'une ville"),
+          TextField(
+            controller: myController,
+          ),
+        ],
+      )),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          showDialog(
+            context: context,
+            builder: (context) {
+              return AlertDialog(
+                content: Column(
+                  children: [
+                    Text(
+                      myController.text,
+                      style: const TextStyle(fontSize: 20),
+                    ),
+                    FutureBuilder(
+                        future: getPositonHttp(myController.text),
+                        builder: (context, snapshot) {
+                          if (snapshot.hasData) {
+                            return Column(
+                              children: [
+                                FutureBuilder(
+                                  future: getWeatherHttp(
+                                      snapshot.data!.longitude,
+                                      snapshot.data!.latitude),
+                                  builder: (contextWeather, snapshotWeather) {
+                                    if (snapshot.isDefinedAndNotNull) {
+                                      double resTemperature =
+                                          snapshotWeather.data!.temperature -
+                                              273.15;
+                                      return Column(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            Image.network(
+                                                'https://openweathermap.org/img/wn/${snapshotWeather.data!.icon}@2x.png',
+                                                width: 150),
+                                            Text("${resTemperature.round()} °")
+                                          ]);
+                                    } else {
+                                      return const CircularProgressIndicator();
+                                    }
+                                  },
+                                )
+                              ],
+                            );
+                          } else if (snapshot.hasError) {
+                            return const Text("Error API");
+                          } else {
+                            return const CircularProgressIndicator();
+                          }
+                        }),
+                  ],
+                ),
+              );
+            },
+          );
+        },
+        tooltip: 'Show me the value!',
+        child: const Icon(Icons.text_fields),
       ),
     );
   }
